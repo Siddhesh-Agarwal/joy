@@ -9,7 +9,6 @@ BASIC USAGE
 An example of using joy:
 
     >>> from joy import *
-    >>>
     >>> c = circle(x=100, y=100, r=50)
     >>> show(c)
 
@@ -95,10 +94,11 @@ JUPYTER LAB INTEGRATION
 Joy integrates very well with Jupyter notebooks and every shape is
 represented as SVG image by jupyter.
 """
+
 import html
 import itertools
-import random as random_module
-import string
+import secrets
+from typing import Any, List, Optional
 
 __version__ = "0.3.1"
 __author__ = "Anand Chitipothu <anand@fossunited.org>"
@@ -106,12 +106,16 @@ __author__ = "Anand Chitipothu <anand@fossunited.org>"
 SQRT2 = 2**0.5
 
 # Random suffix to avoid conflicts between ids of multiple sketches in the same page
-ID_SUFFIX = "".join(random_module.choice(string.ascii_letters+string.digits) for i in range(4))
+ID_SUFFIX = secrets.token_hex(4)
+
 
 def shape_sequence():
-    return (f"s-{i}-{ID_SUFFIX}" for i in itertools.count())
+    for i in itertools.count():
+        yield f"s-{i}-{ID_SUFFIX}"
+
 
 shape_seq = shape_sequence()
+
 
 class Shape:
     """Shape is the base class for all shapes in Joy.
@@ -121,31 +125,37 @@ class Shape:
     Typically, users do not interact with this class directly, but use it
     through its subclasses.
     """
-    def __init__(self, tag, children=None, transform=None, **attrs):
-        """Creates a new shape.
-        """
+
+    def __init__(
+        self,
+        tag: str,
+        children=None,
+        transform: Optional["Transformation"] = None,
+        **kwargs,
+    ):
+        """Creates a new shape."""
         self.tag = tag
         self.children = children
-        self.attrs = attrs
-        self.transform = None
+        self.kwargs = kwargs
+        self.transform = transform
 
     def get_reference(self):
-        if not "id" in self.attrs:
-            self.attrs["id"] = next(shape_seq)
+        if "id" not in self.kwargs:
+            self.kwargs["id"] = next(shape_seq)
 
-        attrs = {"xlink:href": "#" + self.id}
-        return Shape("use", **attrs)
+        kwargs = {"xlink:href": "#" + self.id}
+        return Shape("use", **kwargs)
 
     def __repr__(self):
-        return f"<{self.tag} {self.attrs}>"
+        return f"<{self.tag} {self.kwargs}>"
 
-    def __getattr__(self, name):
-        if not name.startswith("_") and name in self.attrs:
-            return self.attrs[name]
+    def __getattr__(self, name: str):
+        if not name.startswith("_") and name in self.kwargs:
+            return self.kwargs[name]
         else:
             raise AttributeError(name)
 
-    def apply_transform(self, transform):
+    def apply_transform(self, transform: Optional["Transformation"]):
         if self.transform is not None:
             transform = self.transform | transform
 
@@ -157,26 +167,26 @@ class Shape:
         shape = object.__new__(self.__class__)
         shape.__dict__.update(self.__dict__)
 
-        # don't share attrs on clone
+        # don't share kwargs on clone
         # also remove the id as the new nodes gets a new id
-        shape.attrs = dict(self.attrs)
-        shape.attrs.pop("id", None)
+        shape.kwargs = dict(self.kwargs)
+        shape.kwargs.pop("id", None)
         return shape
 
     def get_attrs(self):
-        attrs = dict(self.attrs)
+        kwargs = dict(self.kwargs)
         if self.transform:
-            attrs['transform'] = self.transform.as_str()
-        return attrs
+            kwargs["transform"] = repr(self.transform)
+        return kwargs
 
     def as_dict(self):
         d = self.get_attrs()
-        d['tag'] = self.tag
+        d["tag"] = self.tag
         if self.children:
-            d['children'] = [n.as_dict() for n in self.children]
+            d["children"] = [repr(n) for n in self.children]
         return d
 
-    def _svg(self, indent="") -> str:
+    def _svg(self, indent: str = "") -> str:
         """Returns the svg representation of this node.
 
         This method is used to recursively construct the svg of a node
@@ -186,19 +196,26 @@ class Shape:
             >>> c._svg()
             '<circle cx="100" cy="100" r="50" />'
         """
-        attrs = self.get_attrs()
+        kwargs = self.get_attrs()
         if self.children:
-            tag_text = render_tag(self.tag, **attrs, close=False)
-            return (
-                indent + tag_text + "\n" +
-                "".join(c._svg(indent + "  ") for c in self.children) +
-                indent + "</" + self.tag + ">\n"
+            tag_text = render_tag(self.tag, **kwargs, close=False)
+            return "".join(
+                [
+                    indent,
+                    tag_text,
+                    "\n",
+                    "".join(c._svg(indent + "  ") for c in self.children),
+                    indent,
+                    "</",
+                    self.tag,
+                    ">\n",
+                ]
             )
         else:
-            tag_text = render_tag(self.tag, **attrs, close=True)
+            tag_text = render_tag(self.tag, **kwargs, close=True)
             return indent + tag_text + "\n"
 
-    def as_svg(self, width=300, height=300) -> str:
+    def as_svg(self, width: float = 300, height: float = 300) -> str:
         """Renders this node as svg image.
 
         The svg image is assumed to be of size (300, 300) unless the
@@ -214,7 +231,7 @@ class Shape:
         """
         return SVG([self], width=width, height=height).render()
 
-    def __add__(self, shape):
+    def __add__(self, shape: Any):
         if not isinstance(shape, Shape):
             return NotImplemented
         return Group([self, shape])
@@ -227,16 +244,17 @@ class Shape:
         """
         return self.as_svg()
 
+
 class SVG:
-    """SVG renders any svg element into an svg image.
-    """
-    def __init__(self, nodes, width=300, height=300):
+    """SVG renders any svg element into an svg image."""
+
+    def __init__(self, nodes: List[Shape], width: float = 300, height: float = 300):
         self.nodes = nodes
         self.width = width
         self.height = height
 
     def render(self):
-        attrs = {
+        kwargs = {
             "tag": "svg",
             "width": self.width,
             "height": self.height,
@@ -244,9 +262,9 @@ class SVG:
             "fill": "none",
             "stroke": "black",
             "xmlns": "http://www.w3.org/2000/svg",
-            "xmlns:xlink": "http://www.w3.org/1999/xlink"
+            "xmlns:xlink": "http://www.w3.org/1999/xlink",
         }
-        svg_header = render_tag(**attrs)+ "\n"
+        svg_header = render_tag(**kwargs) + "\n"
         svg_footer = "</svg>\n"
 
         # flip the y axis so that y grows upwards
@@ -263,6 +281,7 @@ class SVG:
     def __repr__(self):
         return "SVG:{self.nodes}"
 
+
 class Point:
     """Creates a new Point.
 
@@ -271,17 +290,17 @@ class Point:
 
         >>> p = Point(x=100, y=50)
     """
-    def __init__(self, x, y):
+
+    def __init__(self, x: float, y: float):
         self.x = x
         self.y = y
 
     def __eq__(self, p):
-        return isinstance(p, Point) \
-            and p.x == self.x \
-            and p.y == self.y
+        return isinstance(p, Point) and p.x == self.x and p.y == self.y
 
     def __repr__(self):
         return f"Point({self.x}, {self.y})"
+
 
 class Circle(Shape):
     """Creates a circle shape.
@@ -315,16 +334,14 @@ class Circle(Shape):
     When no arguments are specified, it uses (0, 0) as the center and
     100 as the radius.
     """
-    def __init__(self, center=Point(0, 0), radius=100, **kwargs):
+
+    def __init__(self, center: Point = Point(0, 0), radius: float = 100, **kwargs):
         self.center = center
         self.radius = radius
 
         cx, cy = self.center.x, self.center.y
-        super().__init__("circle",
-            cx=cx,
-            cy=cy,
-            r=self.radius,
-            **kwargs)
+        super().__init__("circle", cx=cx, cy=cy, r=self.radius, **kwargs)
+
 
 class Ellipse(Shape):
     """Creates an ellipse shape.
@@ -360,21 +377,23 @@ class Ellipse(Shape):
         >>> r = Ellipse(center=Point(x=100, y=100), width=200, height=100)
         >>> show(r)
     """
-    def __init__(self, center=Point(0, 0), width=200, height=100, **kwargs):
+
+    def __init__(
+        self,
+        center: Point = Point(0, 0),
+        width: float = 200,
+        height: float = 100,
+        **kwargs,
+    ):
         self.center = center
         self.width = width
         self.height = height
 
         cx, cy = self.center.x, self.center.y
-        rx = width/2
-        ry = height/2
-        super().__init__(
-            tag="ellipse",
-            cx=cx,
-            cy=cy,
-            rx=rx,
-            ry=ry,
-            **kwargs)
+        rx = width / 2
+        ry = height / 2
+        super().__init__(tag="ellipse", cx=cx, cy=cy, rx=rx, ry=ry, **kwargs)
+
 
 class Rectangle(Shape):
     """Creates a rectangle shape.
@@ -410,21 +429,23 @@ class Rectangle(Shape):
         >>> r = Rectangle(center=Point(x=100, y=100), width=200, height=100)
         >>> show(r)
     """
-    def __init__(self, center=Point(0, 0), width=200, height=100, **kwargs):
+
+    def __init__(
+        self,
+        center: Point = Point(0, 0),
+        width: float = 200,
+        height: float = 100,
+        **kwargs,
+    ):
         self.center = center
         self.width = width
         self.height = height
 
         cx, cy = self.center.x, self.center.y
-        x = cx - width/2
-        y = cy - height/2
-        super().__init__(
-            tag="rect",
-            x=x,
-            y=y,
-            width=width,
-            height=height,
-            **kwargs)
+        x = cx - width / 2
+        y = cy - height / 2
+        super().__init__(tag="rect", x=x, y=y, width=width, height=height, **kwargs)
+
 
 class Line(Shape):
     """Basic shape for drawing a line connecting two points.
@@ -450,7 +471,10 @@ class Line(Shape):
         >>> z = line(start=Point(x=0, y=0), end=Point(x=100, y=50))
         >>> show(z)
     """
-    def __init__(self, start=Point(-100, 0), end=Point(100, 0), **kwargs):
+
+    def __init__(
+        self, start: Point = Point(-100, 0), end: Point = Point(100, 0), **kwargs
+    ):
         self.start = start
         self.end = end
 
@@ -458,6 +482,7 @@ class Line(Shape):
         x2, y2 = self.end.x, self.end.y
 
         super().__init__("line", x1=x1, y1=y1, x2=x2, y2=y2, **kwargs)
+
 
 class Group(Shape):
     """Creates a container to group a list of shapes.
@@ -487,10 +512,12 @@ class Group(Shape):
         >>> shape = Circle() + Rectangle()
         >>> show(shape)
     """
-    def __init__(self, shapes, **kwargs):
+
+    def __init__(self, shapes: List[Shape], **kwargs):
         super().__init__("g", children=shapes, **kwargs)
 
-def render_tag(tag, *, close=False, **attrs):
+
+def render_tag(tag, *, close: bool = False, **kwargs):
     """Renders a html/svg tag.
 
         >>> render_tag("circle", cx=0, cy=0, r=10)
@@ -508,42 +535,49 @@ def render_tag(tag, *, close=False, **attrs):
     """
     end = " />" if close else ">"
 
-    if attrs:
-        items = [(k.replace("_", "-"), html.escape(str(v))) for k, v in attrs.items() if v is not None]
+    if kwargs:
+        items = [
+            (k.replace("_", "-"), html.escape(str(v)))
+            for k, v in kwargs.items()
+            if v is not None
+        ]
         attrs_text = " ".join(f'{k}="{v}"' for k, v in items)
 
         return f"<{tag} {attrs_text}{end}"
     else:
         return f"<{tag}{end}"
 
+
 class Transformation:
-    def apply(self, shape):
+    def apply(self, shape: Shape):
         return shape.apply_transform(self)
 
-    def join(self, transformation):
+    def join(self, transformation: "Transformation"):
         return TransformationList([self, transformation])
 
-    def __or__(self, right):
+    def __or__(self, right: Any):
         if not isinstance(right, Transformation):
             return NotImplemented
         return self.join(transformation=right)
 
-    def __ror__(self, left):
+    def __ror__(self, left: Any):
         if not isinstance(left, Shape):
             return NotImplemented
         return self.apply(shape=left)
 
+
 class TransformationList(Transformation):
-    def __init__(self, transformations):
+    def __init__(self, transformations: List[Transformation]):
         self.transformations = transformations
 
-    def join(self, transformation):
+    def join(self, transformation: Transformation):
         return TransformationList(self.transformations + [transformation])
 
-    def as_str(self):
+    def __repr__(self):
         # Reversing the transformations as SVG applies them in the
         # reverse order (the rightmost is appled first)
-        return " ".join(t.as_str() for t in self.transformations[::-1])
+        return " ".join(map(repr, reversed(self.transformations)))
+
 
 class Translate(Transformation):
     """Creates a new Translate transformation that moves a shape by
@@ -563,12 +597,14 @@ class Translate(Transformation):
         >>> c = Circle() | Translate(100, 50)
         >>> show(c)
     """
-    def __init__(self, x, y):
+
+    def __init__(self, x: float, y: float):
         self.x = x
         self.y = y
 
-    def as_str(self):
+    def __repr__(self):
         return f"translate({self.x} {self.y})"
+
 
 class Rotate(Transformation):
     """Creates a new rotate transformation.
@@ -586,7 +622,7 @@ class Rotate(Transformation):
 
     Examples:
 
-    Rotates a square by 45 degrees.
+    Rotates a shape by 45 degrees.
 
         >>> shape = Rectangle() | Rotate(angle=45)
         >>> show(shape)
@@ -599,16 +635,17 @@ class Rotate(Transformation):
         >>> shape = combine(r1, r2)
         >>> show(shape)
     """
-    def __init__(self, angle, anchor=Point(0, 0)):
+
+    def __init__(self, angle: float, anchor: Point = Point(0, 0)):
         self.angle = angle
         self.anchor = anchor
 
-    def as_str(self):
+    def __repr__(self):
         origin = Point(0, 0)
         if self.anchor == origin:
             return f"rotate({self.angle})"
-        else:
-            return f"rotate({self.angle} {self.anchor.x} {self.anchor.y})"
+        return f"rotate({self.angle} {self.anchor.x} {self.anchor.y})"
+
 
 class Scale(Transformation):
     """Creates a new scale transformation.
@@ -621,14 +658,14 @@ class Scale(Transformation):
             The scale factor in the y direction. Defaults to
             the value of sx if not provided.
     """
-    def __init__(self, sx, sy=None):
-        if sy is None:
-            sy = sx
-        self.sx = sx
-        self.sy = sy
 
-    def as_str(self):
+    def __init__(self, sx: float, sy: Optional[float] = None):
+        self.sx = sx
+        self.sy = sy or sx
+
+    def __repr__(self):
         return f"scale({self.sx} {self.sy})"
+
 
 class Repeat(Transformation):
     """Repeat is a higher-order transformation that repeats a
@@ -659,22 +696,24 @@ class Repeat(Transformation):
         >>> shape = Line() | Repeat(18, Rotate(angle=10) | Scale(sx=0.9))
         >>> show(shape)
     """
-    def __init__(self, n, transformation):
+
+    def __init__(self, n: int, transformation: Transformation):
         self.n = n
         self.transformation = transformation
 
-    def apply(self, shape):
+    def apply(self, shape: Shape):
         ref = shape.get_reference()
         defs = Shape("defs", children=[shape])
 
         return defs + self._apply(ref, self.transformation, self.n)
 
-    def _apply(self, shape, tf, n):
+    def _apply(self, shape: Shape, tf: Transformation, n: int) -> Shape:
         if n == 1:
             return shape
         else:
-            result = self._apply(shape, tf, n-1) | tf
+            result = self._apply(shape, tf, n - 1) | tf
             return shape + result
+
 
 class Cycle(Transformation):
     """
@@ -727,19 +766,30 @@ class Cycle(Transformation):
         >>> shape = Rectangle(width=300, height=300) | cycle(n=72, s=0.92)
         >>> show(shape)
     """
-    def __init__(self, n=18, anchor=Point(x=0, y=0), s=None, angle=None):
+
+    def __init__(
+        self,
+        n: int = 18,
+        anchor: Point = Point(x=0, y=0),
+        s: Optional[float] = None,
+        angle: Optional[float] = None,
+    ):
         self.n = n
-        self.angle = angle if angle is not None else 360/n
+        self.angle = angle if angle is not None else 360 / n
         self.anchor = anchor
         self.s = s
 
-    def apply(self, shape):
-        shapes = [shape | Rotate(angle=i*self.angle, anchor=self.anchor) for i in range(self.n)]
+    def apply(self, shape: Shape):
+        shapes = [
+            shape | Rotate(angle=i * self.angle, anchor=self.anchor)
+            for i in range(self.n)
+        ]
         if self.s is not None:
             shapes = [shape_ | Scale(sx=self.s**i) for i, shape_ in enumerate(shapes)]
         return Group(shapes)
 
-def show(*shapes):
+
+def show(*shapes: Shape):
     """Shows the given shapes.
 
     It also adds a border to the canvas and axis at the origin with
@@ -765,15 +815,17 @@ def show(*shapes):
     markers = [
         Rectangle(width=300, height=300, stroke="#ddd"),
         Line(start=Point(x=-150, y=0), end=Point(x=150, y=0), stroke="#ddd"),
-        Line(start=Point(x=0, y=-150), end=Point(x=0, y=150), stroke="#ddd")
+        Line(start=Point(x=0, y=-150), end=Point(x=0, y=150), stroke="#ddd"),
     ]
-    shapes = markers + list(shapes)
-    img = SVG(shapes)
+    shapes_ = markers + list(shapes)
+    img = SVG(shapes_)
 
     from IPython.display import display
+
     display(img)
 
-def circle(x=0, y=0, r=100, **kwargs):
+
+def circle(x: float = 0, y: float = 0, r: float = 100, **kwargs):
     """Creates a circle with center at (x, y) and radius of r.
 
     Examples:
@@ -795,7 +847,8 @@ def circle(x=0, y=0, r=100, **kwargs):
     """
     return Circle(center=Point(x=x, y=y), radius=r, **kwargs)
 
-def rectangle(x=0, y=0, w=200, h=100, **kwargs):
+
+def rectangle(x: float = 0, y: float = 0, w: float = 200, h: float = 100, **kwargs):
     """Creates a rectangle with center at (x, y), a width of w and a height of h.
 
     Examples:
@@ -817,7 +870,8 @@ def rectangle(x=0, y=0, w=200, h=100, **kwargs):
     """
     return Rectangle(center=Point(x=x, y=y), width=w, height=h, **kwargs)
 
-def ellipse(x=0, y=0, w=200, h=100, **kwargs):
+
+def ellipse(x: float = 0, y: float = 0, w: float = 200, h: float = 100, **kwargs):
     """Creates an ellipse with center at (x, y), a width of w and a height of h.
 
     Examples:
@@ -839,7 +893,14 @@ def ellipse(x=0, y=0, w=200, h=100, **kwargs):
     """
     return Ellipse(center=Point(x=x, y=y), width=w, height=h, **kwargs)
 
-def line(x1=None, y1=None, x2=None, y2=None, **kwargs):
+
+def line(
+    x1: Optional[float] = None,
+    y1: Optional[float] = None,
+    x2: Optional[float] = None,
+    y2: Optional[float] = None,
+    **kwargs,
+):
     """Creates a line from point (x1, y1) to point (x2, y2).
 
     Examples:
@@ -859,16 +920,17 @@ def line(x1=None, y1=None, x2=None, y2=None, **kwargs):
         pairs = dict(x1=x1, y1=y1, x2=x2, y2=y2)
         missing = [name for name, value in pairs.items() if value is None]
         if missing:
-            raise Exception("missing arguments for line: ", ", ".join(missing))
+            raise ValueError("missing arguments for line: ", ", ".join(missing))
 
     return Line(start=Point(x1, y1), end=Point(x2, y2), **kwargs)
 
-def point(x, y):
-    """Creates a Point with x and y coordinates.
-    """
+
+def point(x: float, y: float):
+    """Creates a Point with x and y coordinates."""
     return Point(x, y)
 
-def polygon(points, **kwargs):
+
+def polygon(points: List[Point], **kwargs):
     """Creates a polygon with given list points.
 
     Example:
@@ -882,7 +944,8 @@ def polygon(points, **kwargs):
     points_str = " ".join(f"{p.x},{p.y}" for p in points)
     return Shape(tag="polygon", points=points_str, **kwargs)
 
-def polyline(points, **kwargs):
+
+def polyline(points: List[Point], **kwargs):
     """Creates a polyline with given list points.
 
     Example:
@@ -897,7 +960,8 @@ def polyline(points, **kwargs):
     points_str = " ".join(f"{p.x},{p.y}" for p in points)
     return Shape(tag="polyline", points=points_str, **kwargs)
 
-def translate(x=0, y=0):
+
+def translate(x: float = 0, y: float = 0):
     """Translates a shape.
 
     Examples:
@@ -916,7 +980,8 @@ def translate(x=0, y=0):
     """
     return Translate(x=x, y=y)
 
-def scale(s=None, x=1, y=1):
+
+def scale(s: Optional[float] = None, x: float = 1, y: float = 1):
     """Scales a shape.
 
     Examples:
@@ -939,21 +1004,21 @@ def scale(s=None, x=1, y=1):
     """
     if s is not None:
         return Scale(sx=s, sy=s)
-    else:
-        return Scale(sx=x, sy=y)
+    return Scale(sx=x, sy=y)
 
-def rotate(angle):
+
+def rotate(angle: float):
     """Rotates a shape.
 
     Examples:
 
     Rotate a shape by 30 degrees
-
         shape = line() | rotate(30)
     """
     return Rotate(angle)
 
-def repeat(n, transformation):
+
+def repeat(n: int, transformation: Transformation):
     """Repeats a transformation multiple times on a shape.
 
     Examples:
@@ -964,7 +1029,8 @@ def repeat(n, transformation):
     """
     return Repeat(n, transformation)
 
-def combine(shapes):
+
+def combine(shapes: List[Shape]):
     """The combine function combines a list of shapes into a single shape.
 
     Example:
@@ -974,7 +1040,8 @@ def combine(shapes):
     """
     return Group(shapes)
 
-def color(r, g, b, a=None):
+
+def color(r: int, g: int, b: int, a: Optional[float] = None):
     """Creates a color with given r g b values.
 
     Parameters:
@@ -987,10 +1054,10 @@ def color(r, g, b, a=None):
     """
     if a is None:
         return f"rgb({r}, {g}, {b})"
-    else:
-        return f"rgba({r}, {g}, {b}, {a})"
+    return f"rgba({r}, {g}, {b}, {a})"
 
-def random(a=None, b=None):
+
+def random(a: Optional[float] = None, b: Optional[float] = None):
     """Creates a random number.
 
     The random function can be used in three ways:
@@ -1008,10 +1075,11 @@ def random(a=None, b=None):
         >>> random(5, 10)
         7.471950621969087
     """
-    if a is None and b is None:
-        return random_module.random()
-    elif a is not None and b is None:
-        return a * random_module.random()
-    else:
-        delta = b - a
-        return a + delta * random_module.random()
+    if a is None or b is None:
+        if a is None and b is not None:
+            raise ValueError(
+                "parameter `b` should be `None` if parameter `a` is `None`"
+            )
+        return secrets.randbelow(1) * (a or 1)
+    delta = b - a
+    return a + delta * secrets.randbelow(1)
