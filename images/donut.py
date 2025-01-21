@@ -1,10 +1,12 @@
-from joy import *
+from joy import Circle, Point
 from _img import render
 
-def donut(x, y, r):
+
+def donut(x: float, y: float, r: float):
     c1 = Circle(center=Point(x=x, y=y), radius=r)
-    c2 = Circle(center=Point(x=x, y=y), radius=r/2)
-    return c1+c2
+    c2 = Circle(center=Point(x=x, y=y), radius=r / 2)
+    return c1 + c2
+
 
 d = donut(0, 0, 100)
 render(d)

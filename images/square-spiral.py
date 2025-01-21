@@ -1,5 +1,5 @@
-from joy import *
+from joy import Rectangle, Repeat, Rotate, Scale
 from _img import render
 
-shape = Rectangle(width=300, height=300) | Repeat(72, Rotate(360/72) | Scale(0.92))
+shape = Rectangle(width=300, height=300) | Repeat(72, Rotate(360 / 72) | Scale(0.92))
 render(shape)
